@@ -1,18 +1,23 @@
 import datetime
+from copy import deepcopy
 
 from django.conf import settings
 from django.shortcuts import render, redirect
+from django.urls import reverse
 from django.utils import timezone
-from django.template import RequestContext
 
 from edivorce.apps.core.utils.derived import get_derived_data
-from ..decorators import bceid_required, intercept
+from ..decorators import bceid_required, intercept, prequal_completed
 from ..utils.question_step_mapping import list_of_registries
-from ..utils.step_completeness import get_step_status, is_complete, get_formatted_incomplete_list
+from ..utils.step_completeness import get_error_dict, get_missed_question_keys, get_step_completeness, is_complete, get_formatted_incomplete_list
 from ..utils.template_step_order import template_step_order
-from ..utils.user_response import get_responses_from_db, copy_session_to_db, \
-    get_responses_from_db_grouped_by_steps, get_responses_from_session, \
-    get_responses_from_session_grouped_by_steps
+from ..utils.user_response import (
+    get_data_for_user,
+    copy_session_to_db,
+    get_step_responses,
+    get_responses_from_session,
+    get_responses_from_session_grouped_by_steps,
+)
 
 
 def home(request):
@@ -38,13 +43,14 @@ def prequalification(request, step):
     """
     template = 'prequalification/step_%s.html' % step
 
-    if not request.user.is_authenticated():
+    if not request.user.is_authenticated:
         responses_dict = get_responses_from_session(request)
     else:
-        responses_dict = get_responses_from_db(request.user)
+        responses_dict = get_data_for_user(request.user)
         responses_dict['active_page'] = 'prequalification'
-        responses_by_step = get_responses_from_db_grouped_by_steps(request.user)
-        responses_dict['step_status'] = get_step_status(responses_by_step)
+        responses_by_step = get_step_responses(responses_dict)
+        step_status = get_step_completeness(responses_by_step)
+        responses_dict['step_status'] = step_status
 
     return render(request, template_name=template, context=responses_dict)
 
@@ -53,22 +59,31 @@ def success(request):
     """
     This page is shown if the user passes the qualification test
     """
-    if request.user.is_authenticated():
-        return redirect(settings.PROXY_BASE_URL + settings.FORCE_SCRIPT_NAME[:-1] + '/overview')
+    if request.user.is_authenticated:
+        responses = get_data_for_user(request.user)
+        prequal_responses = get_step_responses(responses)['prequalification']
+    else:
+        prequal_responses = get_responses_from_session_grouped_by_steps(request)['prequalification']
+    complete = is_complete(prequal_responses)
 
-    prequal_responses = get_responses_from_session_grouped_by_steps(request)['prequalification']
-    complete, _ = is_complete('prequalification', prequal_responses)
     if complete:
-        return render(request, 'success.html', context={'register_url': settings.REGISTER_URL,'register_sc_url': settings.REGISTER_SC_URL})
-    return redirect(settings.PROXY_BASE_URL + settings.FORCE_SCRIPT_NAME[:-1] + '/incomplete')
+        if request.user.is_authenticated:
+            return redirect(reverse('overview'))
+        else:
+            return render(request, 'success.html', context={'register_url': settings.REGISTER_URL,'register_sc_url': settings.REGISTER_SC_URL})
+    return redirect(reverse('incomplete'))
 
 
 def incomplete(request):
     """
     This page is shown if the user misses any pre-qualification questions
     """
-    prequal_responses = get_responses_from_session_grouped_by_steps(request)['prequalification']
-    _, missed_question_keys = is_complete('prequalification', prequal_responses)
+    if request.user.is_authenticated:
+        responses = get_data_for_user(request.user)
+        prequal_responses = get_step_responses(responses)
+    else:
+        prequal_responses = get_responses_from_session_grouped_by_steps(request)
+    missed_question_keys = get_missed_question_keys(prequal_responses, 'prequalification')
     missed_questions = get_formatted_incomplete_list(missed_question_keys)
 
     responses_dict = get_responses_from_session(request)
@@ -107,7 +122,7 @@ def login(request):
     if settings.DEPLOYMENT_TYPE in ['localdev', 'minishift'] and not request.session.get('fake_bceid_guid'):
         return redirect(settings.PROXY_BASE_URL + settings.FORCE_SCRIPT_NAME[:-1] + '/bceid')
 
-    if not request.user.is_authenticated():
+    if not request.user.is_authenticated:
         # Fix for weird siteminder behaviour......
         # If a user is logged into an IDIR then they can see the login page but
         # the SMGOV headers are missing.  If this is the case, then log them out
@@ -149,17 +164,24 @@ def logout(request):
 
 
 @bceid_required
+@prequal_completed
 @intercept
 def overview(request):
     """
     Dashboard: Process overview page.
     """
-    responses_dict_by_step = get_responses_from_db_grouped_by_steps(request.user)
+    responses_dict = get_data_for_user(request.user)
+    responses_dict_by_step = get_step_responses(responses_dict)
 
     # Add step status dictionary
-    responses_dict_by_step['step_status'] = get_step_status(responses_dict_by_step)
+    step_status = get_step_completeness(responses_dict_by_step)
+    responses_dict_by_step['step_status'] = step_status
     responses_dict_by_step['active_page'] = 'overview'
-    responses_dict_by_step['derived'] = get_derived_data(get_responses_from_db(request.user))
+    responses_dict_by_step['derived'] = get_derived_data(responses_dict)
+
+    # Dashnav needs filing option to determine which steps to show
+    for question in responses_dict_by_step['signing_filing']:
+        responses_dict_by_step[question['question_id']] = question['value']
 
     response = render(request, 'overview.html', context=responses_dict_by_step)
 
@@ -170,17 +192,19 @@ def overview(request):
 
 
 @bceid_required
+@prequal_completed
 def dashboard_nav(request, nav_step):
     """
     Dashboard: All other pages
     """
-    responses_dict = get_responses_from_db(request.user)
+    responses_dict = get_data_for_user(request.user)
     responses_dict['active_page'] = nav_step
     template_name = 'dashboard/%s.html' % nav_step
     return render(request, template_name=template_name, context=responses_dict)
 
 
 @bceid_required
+@prequal_completed
 def question(request, step, sub_step=None):
     """
     View for rendering main divorce questionaire questions
@@ -188,15 +212,22 @@ def question(request, step, sub_step=None):
     sub_page_template = '_{}'.format(sub_step) if sub_step else ''
     template = 'question/%02d_%s%s.html' % (template_step_order[step], step, sub_page_template)
 
-    responses_dict_by_step = get_responses_from_db_grouped_by_steps(request.user, True)
-
     if step == "review":
+        data_dict = get_data_for_user(request.user)
+        responses_dict_by_step = get_step_responses(data_dict)
+        step_status = get_step_completeness(responses_dict_by_step)
+        data_dict.update(get_error_dict(responses_dict_by_step))
+        derived = get_derived_data(data_dict)
         responses_dict = responses_dict_by_step
     else:
-        responses_dict = get_responses_from_db(request.user)
+        responses_dict = get_data_for_user(request.user)
+        responses_dict_by_step = get_step_responses(responses_dict)
+        step_status = get_step_completeness(responses_dict_by_step)
+        responses_dict.update(get_error_dict(responses_dict_by_step, step, sub_step))
+        derived = get_derived_data(responses_dict)
 
     # Add step status dictionary
-    responses_dict['step_status'] = get_step_status(responses_dict_by_step)
+    responses_dict['step_status'] = step_status
 
     responses_dict['active_page'] = step
     # If page is filing location page, add registries dictionary for list of court registries
@@ -204,23 +235,23 @@ def question(request, step, sub_step=None):
         responses_dict['registries'] = sorted(list_of_registries)
 
     responses_dict['sub_step'] = sub_step
-    responses_dict['derived'] = get_derived_data(get_responses_from_db(request.user))
+    responses_dict['derived'] = derived
 
     return render(request, template_name=template, context=responses_dict)
 
 
-def page_not_found(request):
+def page_not_found(request, exception, template_name='404.html'):
     """
     404 Error Page
     """
-    return render(request, '404.html', status=404)
+    return render(request, template_name, status=404)
 
 
-def server_error(request):
+def server_error(request, template_name='500.html'):
     """
     500 Error Page
     """
-    return render(request, '500.html', status=500)
+    return render(request, template_name, status=500)
 
 
 def legal(request):
@@ -236,11 +267,13 @@ def acknowledgements(request):
     """
     return render(request, 'acknowledgements.html', context={'active_page': 'acknowledgements'})
 
+
 def contact(request):
     """
     Contact Us page
     """
     return render(request, 'contact-us.html', context={'active_page': 'contact'})
+
 
 @bceid_required
 def intercept_page(request):
@@ -250,7 +283,7 @@ def intercept_page(request):
     input.
     """
     template = 'question/%02d_%s.html' % (template_step_order['orders'], 'orders')
-    responses_dict = get_responses_from_db(request.user)
+    responses_dict = get_data_for_user(request.user)
     responses_dict['intercepted'] = True
 
     return render(request, template_name=template, context=responses_dict)

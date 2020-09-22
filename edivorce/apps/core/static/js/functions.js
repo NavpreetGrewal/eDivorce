@@ -117,15 +117,6 @@ var showHideTargetId = function(el, id, relatedId, revealControlGroup) {
         if (relatedId !== undefined) {
             $('#' + relatedId).hide();
         }
-        // Special case of pre-qualification step 4 children.  
-        if (id === "#has_children") {
-            reveal($("input[name=number_children_over_19]"));
-            var over_19_children = parseInt($("input[name=number_children_over_19]").val());
-
-            if (over_19_children >= 0) {
-                reveal($("input[name=number_children_over_19]:checked"));
-            }
-        }
         // Special case of hide child support description.
         if (id === "#child_support_in_order_detail") {
             $("#child_support_description").hide();
@@ -152,12 +143,6 @@ var showHideTargetId = function(el, id, relatedId, revealControlGroup) {
         if (el.data("reveal_force_hide_group")) {
             $(el.data("reveal_force_hide_group")).hide();
             $(el.data("reveal_force_hide_group")).find(':radio').prop('checked', false);
-        }
-        // Special case of pre-qualification step 4 children.
-        if (id === "#has_children") {
-            if (el.val() === 'NO') {
-                $('.not-disqualified-other').show();
-            }
         }
 
         // Special case of show child support description.
@@ -289,7 +274,7 @@ var getValue = function(el, question){
         $('#other_names_fields').find("input[type=text]").each(function () {
             // as per request, alias type will always be also known as for now
             // aliasType = $(this).val() === '' ? '' : $(this).siblings(".alias-type").val();
-            value.push([aliasType, $(this).val()]);
+            value.push([aliasType, $(this).val().trim()]);
         });
         return JSON.stringify(value);
     }
@@ -341,8 +326,13 @@ var getValue = function(el, question){
             }
         });
         return JSON.stringify(value);
-    }
-    else{
+    } else if (el.is("input[type=radio]")) {
+        if (el.prop('checked')) {
+            return el.val();
+        } else {
+            return '';
+        }
+    } else {
         return el.val();
     }
 };

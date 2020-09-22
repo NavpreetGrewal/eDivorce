@@ -2,6 +2,7 @@ from django.conf.urls import url
 
 from .views import main, system, pdf, api, localdev
 
+
 urlpatterns = [
     # url(r'^guide$', styleguide.guide),
     url(r'^api/response$', api.UserResponseHandler.as_view()),

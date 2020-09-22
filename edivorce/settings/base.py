@@ -11,7 +11,11 @@ https://docs.djangoproject.com/en/1.8/ref/settings/
 """
 
 import os
+from environs import Env
 from unipath import Path
+
+env = Env()
+env.read_env()  # read .env file, if it exists
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -43,16 +47,24 @@ INSTALLED_APPS = (
     'django.contrib.humanize',
     'rest_framework',
     'debug_toolbar',
+    'corsheaders',
     'edivorce.apps.core',
     'compressor',
     'crispy_forms',
     'sass_processor',
 )
 
-MIDDLEWARE_CLASSES = (
+# add the POC app only if applicable
+if ENVIRONMENT in ['localdev', 'dev', 'test', 'minishift']:
+    INSTALLED_APPS += (
+        'edivorce.apps.poc',
+    )
+
+MIDDLEWARE = (
     'edivorce.apps.core.middleware.basicauth_middleware.BasicAuthMiddleware',
     'debug_toolbar.middleware.DebugToolbarMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -90,6 +102,22 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'edivorce.apps.core.authenticators.BCeIDAuthentication',
     ]
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        '': {
+            'handlers': ['console'],
+            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+        },
+    },
 }
 
 # Internationalization
@@ -137,6 +165,7 @@ GTM_ID = 'GTM-NJLR7LT'
 def show_toolbar(request):
     return ENVIRONMENT in ['localdev', 'dev', 'minishift']
 
+
 DEBUG_TOOLBAR_CONFIG = {
     'SHOW_TOOLBAR_CALLBACK': show_toolbar,
     'SHOW_COLLAPSED': True,
@@ -145,3 +174,14 @@ DEBUG_TOOLBAR_CONFIG = {
 SECURE_BROWSER_XSS_FILTER = True
 
 LOGOUT_URL = '/accounts/logout/'
+
+# CLAMAV settings
+
+# eFiling Hub settings
+EFILING_HUB_TOKEN_BASE_URL = env('EFILING_HUB_TOKEN_BASE_URL', 'https://efiling.gov.bc.ca')
+EFILING_HUB_REALM = env('EFILING_HUB_REALM', 'abc')
+EFILING_HUB_CLIENT_ID = env('EFILING_HUB_CLIENT_ID', 'abc')
+EFILING_HUB_CLIENT_SECRET = env('EFILING_HUB_CLIENT_SECRET', 'abc')
+EFILING_HUB_API_BASE_URL = env('EFILING_HUB_API_BASE_URL', 'https://efiling.gov.bc.ca')
+
+EFILING_BCEID = env.dict('EFILING_BCEID', '', subcast=str)

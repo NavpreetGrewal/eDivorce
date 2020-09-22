@@ -123,7 +123,8 @@ def age(date):
 @register.filter
 def money(amount, symbol=True):
     """ Return a properly formatted currency string including symbol """
-
+    if not amount:
+        amount = 0
     try:
         return locale.currency(float(amount), symbol, grouping=True)
     except ValueError:
@@ -175,6 +176,12 @@ def integer(value):
 def lookup(obj, property):
     """ Return the value of a dynamic property within an object"""
     return obj.get(property, '')
+
+
+@register.simple_tag(takes_context=True)
+def lookup_context(context, property):
+    """ Return the value of a dynamic property from context"""
+    return context.get(property, '')
 
 
 @register.simple_tag(takes_context=True)

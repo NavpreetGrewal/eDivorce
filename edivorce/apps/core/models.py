@@ -31,9 +31,11 @@ class BceidUser(models.Model):
     has_accepted_terms = models.BooleanField(default=False)
     """ Flag for accepting terms of service """
 
+    @property
     def is_authenticated(self):
         return True
 
+    @property
     def is_anonymous(self):
         return False
 
@@ -91,10 +93,10 @@ class UserResponse(models.Model):
     User input
     """
 
-    bceid_user = models.ForeignKey(BceidUser, related_name='responses')
+    bceid_user = models.ForeignKey(BceidUser, related_name='responses', on_delete=models.CASCADE)
     """ User providing response """
 
-    question = models.ForeignKey(Question, related_name='responses')
+    question = models.ForeignKey(Question, related_name='responses', on_delete=models.CASCADE)
     """ Originating question """
 
     value = models.TextField(blank=True)
@@ -107,6 +109,31 @@ class UserResponse(models.Model):
         return '%s -> %s' % (self.bceid_user, self.question.key)
 
 
+class DontLog:
+    def log_addition(self, *args):
+        return
+
+    def log_change(self, *args):
+        return
+
+    def log_deletion(self, *args):
+        return
+
+
+class UserResponseAdmin(DontLog, admin.ModelAdmin):
+    list_display = ['get_user_name', 'question', 'value']
+
+    def get_user_name(self, obj):
+        return obj.bceid_user.display_name
+
+    get_user_name.admin_order_field = 'bceid_user'
+    get_user_name.short_description = 'User'
+
+
+class QuestionAdmin(DontLog, admin.ModelAdmin):
+    pass
+
+
 admin.site.register(BceidUser)
-admin.site.register(Question)
-admin.site.register(UserResponse)
+admin.site.register(Question, QuestionAdmin)
+admin.site.register(UserResponse, UserResponseAdmin)

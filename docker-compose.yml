@@ -1,0 +1,47 @@
+version: "3.7"
+services:
+
+  # Antivirus
+  antivirus:
+    container_name: edivorce-antivirus
+    hostname: antivirus
+    build: https://github.com/bcgov/clamav.git
+    ports:
+      - "3310:3310"
+    restart: always
+
+  # Redis Server
+  redis:
+    container_name: edivorce-redis
+    image: redis
+    command: redis-server --requirepass admin
+    ports:
+      - "6379:6379"
+    volumes:
+      - data-redis:/data
+    restart: always
+
+  # Redis Commander
+  redis-commander:
+    container_name: edivorce-redis-commander
+    hostname: redis-commander
+    image: rediscommander/redis-commander:latest
+    restart: always
+    environment:
+      - REDIS_PORT=6379
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=admin
+    ports:
+      - "8082:8081"
+
+  # Weasyprint (PDF generator)
+  weasyprint:
+    container_name: edivorce-weasyprint
+    hostname: weasyprint
+    image: aquavitae/weasyprint
+    ports:
+      - "5005:5001"
+    restart: always
+
+volumes:
+  data-redis:
